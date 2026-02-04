@@ -1,0 +1,141 @@
+{% load static %}
+
+<div class="message message-{{ message.role }}" data-message-id="{{ message.id }}">
+    <div class="message-avatar">
+        {% if message.role == 'user' %}
+        <div class="avatar avatar-user">
+            <i data-feather="user"></i>
+        </div>
+        {% else %}
+        <div class="avatar avatar-assistant">
+            <span>🧬</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="message-content">
+        <div class="message-header">
+            <span class="message-role">
+                {% if message.role == 'user' %}You{% else %}SynDe{% endif %}
+            </span>
+            <span class="message-time" title="{{ message.created_at }}">
+                {{ message.created_at|timesince }} ago
+            </span>
+        </div>
+
+        <div class="message-body">
+            {% if message.workflow_status == 'pending' or message.workflow_status == 'running' %}
+            <!-- Workflow in progress -->
+            <div class="workflow-status" data-workflow-id="{{ message.workflow_id }}">
+                <div class="workflow-spinner">
+                    <div class="spinner"></div>
+                </div>
+                <div class="workflow-info">
+                    <span class="workflow-stage">Processing...</span>
+                    <span class="workflow-detail" id="workflow-detail-{{ message.workflow_id }}">
+                        Starting workflow
+                    </span>
+                </div>
+            </div>
+            {% elif message.workflow_status == 'failed' %}
+            <!-- Workflow failed -->
+            <div class="workflow-error">
+                <i data-feather="alert-circle"></i>
+                <span>{{ message.content }}</span>
+            </div>
+            {% else %}
+            <!-- Regular message content -->
+            <div class="message-text">{{ message.content|linebreaks }}</div>
+
+            {% if message.prediction_data and message.prediction_data.response_html %}
+            <div class="message-results">
+                {{ message.prediction_data.response_html|safe }}
+            </div>
+            {% endif %}
+
+            <!-- Structure Viewer Button -->
+            {% if message.has_structure %}
+            <div class="message-actions">
+                <button class="btn btn-secondary btn-small view-structure-btn"
+                        data-pdb="{{ message.structure_data.pdb_data|default:'' }}"
+                        data-message-id="{{ message.id }}">
+                    <i data-feather="box"></i>
+                    <span>View Structure</span>
+                </button>
+                {% if message.structure_data.avg_plddt %}
+                <span class="structure-quality">
+                    pLDDT: {{ message.structure_data.avg_plddt|floatformat:1 }}
+                </span>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <!-- Mutants Display -->
+            {% if message.has_mutants %}
+            <div class="mutants-panel">
+                <h4>Generated Mutants</h4>
+                <div class="mutants-grid">
+                    {% for mutant in message.generation_data.validated_mutants %}
+                    <div class="mutant-card">
+                        <div class="mutant-mutations">
+                            {% for mutation in mutant.mutations %}
+                            <span class="mutation-badge">{{ mutation }}</span>
+                            {% endfor %}
+                        </div>
+                        {% if mutant.score %}
+                        <div class="mutant-score">Score: {{ mutant.score|floatformat:2 }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if message.generation_data.mutant_pdb %}
+                <button class="btn btn-secondary btn-small view-structure-btn"
+                        data-pdb="{{ message.generation_data.mutant_pdb }}"
+                        data-message-id="{{ message.id }}-mutant">
+                    <i data-feather="box"></i>
+                    <span>View Best Mutant Structure</span>
+                </button>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <!-- Protein Data Summary -->
+            {% if message.protein_data %}
+            <div class="protein-summary">
+                <div class="protein-info">
+                    {% if message.protein_data.uniprot_id %}
+                    <span class="protein-tag">
+                        <i data-feather="database"></i>
+                        {{ message.protein_data.uniprot_id }}
+                    </span>
+                    {% endif %}
+                    {% if message.protein_data.sequence_length %}
+                    <span class="protein-tag">
+                        <i data-feather="align-left"></i>
+                        {{ message.protein_data.sequence_length }} residues
+                    </span>
+                    {% endif %}
+                    {% if message.protein_data.structure_source %}
+                    <span class="protein-tag">
+                        <i data-feather="box"></i>
+                        {{ message.protein_data.structure_source }}
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+
+        {% if message.role == 'assistant' and message.content %}
+        <div class="message-footer">
+            <button class="btn-icon btn-small" onclick="copyMessage({{ message.id }})" aria-label="Copy message">
+                <i data-feather="copy"></i>
+            </button>
+            <button class="btn-icon btn-small" onclick="toggleCollapse({{ message.id }})" aria-label="Collapse message">
+                <i data-feather="minimize-2"></i>
+            </button>
+        </div>
+        {% endif %}
+    </div>
+</div>

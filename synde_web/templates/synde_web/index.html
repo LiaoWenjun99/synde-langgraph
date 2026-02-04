@@ -1,0 +1,210 @@
+{% extends "synde_web/base.html" %}
+{% load static %}
+
+{% block title %}Chat{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'synde_web/css/sidebar.css' %}">
+<link rel="stylesheet" href="{% static 'synde_web/css/chat.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <span class="logo-icon">🧬</span>
+                <span class="logo-text">SynDe</span>
+            </div>
+            <button class="btn-icon sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
+                <i data-feather="menu"></i>
+            </button>
+        </div>
+
+        <div class="sidebar-search">
+            <div class="search-input-wrapper">
+                <i data-feather="search" class="search-icon"></i>
+                <input type="text" class="search-input" id="search-input" placeholder="Search conversations...">
+            </div>
+        </div>
+
+        <div class="sidebar-content">
+            <!-- New Chat Button -->
+            <button class="btn btn-primary new-chat-btn" id="new-chat-btn">
+                <i data-feather="plus"></i>
+                <span>New Chat</span>
+            </button>
+
+            <!-- Pinned Conversations -->
+            {% if pinned_conversations %}
+            <div class="sidebar-section">
+                <div class="sidebar-section-header">
+                    <i data-feather="star"></i>
+                    <span>Pinned</span>
+                </div>
+                <ul class="conversation-list">
+                    {% for conv in pinned_conversations %}
+                    <li class="conversation-item {% if current_conversation.id == conv.id %}active{% endif %}"
+                        data-conversation-id="{{ conv.id }}">
+                        <i data-feather="message-circle"></i>
+                        <span class="conversation-title">{{ conv.title }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
+            <!-- Projects -->
+            {% if projects %}
+            <div class="sidebar-section">
+                <div class="sidebar-section-header">
+                    <i data-feather="folder"></i>
+                    <span>Projects</span>
+                    <button class="btn-icon btn-small" id="new-project-btn" aria-label="New project">
+                        <i data-feather="plus"></i>
+                    </button>
+                </div>
+                {% for project in projects %}
+                <div class="project-group" data-project-id="{{ project.id }}">
+                    <div class="project-header" style="--project-color: {{ project.color }}">
+                        <i data-feather="{{ project.icon }}"></i>
+                        <span class="project-name">{{ project.name }}</span>
+                        <i data-feather="chevron-down" class="project-toggle"></i>
+                    </div>
+                    <ul class="conversation-list project-conversations">
+                        {% for conv in project.conversations.all %}
+                        <li class="conversation-item {% if current_conversation.id == conv.id %}active{% endif %}"
+                            data-conversation-id="{{ conv.id }}">
+                            <i data-feather="message-circle"></i>
+                            <span class="conversation-title">{{ conv.title }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Recent Conversations -->
+            <div class="sidebar-section">
+                <div class="sidebar-section-header">
+                    <i data-feather="clock"></i>
+                    <span>Recent</span>
+                </div>
+                <ul class="conversation-list" id="recent-conversations">
+                    {% for conv in recent_conversations %}
+                    <li class="conversation-item {% if current_conversation.id == conv.id %}active{% endif %}"
+                        data-conversation-id="{{ conv.id }}">
+                        <i data-feather="message-circle"></i>
+                        <span class="conversation-title">{{ conv.title }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="sidebar-footer">
+            <a href="{% url 'profile' %}" class="sidebar-footer-item">
+                <i data-feather="user"></i>
+                <span>{{ user.get_display_name }}</span>
+            </a>
+            <button class="btn-icon theme-toggle" id="theme-toggle" aria-label="Toggle theme">
+                <i data-feather="sun" class="theme-icon-light"></i>
+                <i data-feather="moon" class="theme-icon-dark"></i>
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Chat Area -->
+    <main class="chat-main">
+        <header class="chat-header">
+            <button class="btn-icon sidebar-toggle-mobile" id="sidebar-toggle-mobile" aria-label="Toggle sidebar">
+                <i data-feather="menu"></i>
+            </button>
+            <h1 class="chat-title">
+                {% if current_conversation %}
+                    {{ current_conversation.title }}
+                {% else %}
+                    New Conversation
+                {% endif %}
+            </h1>
+            <div class="chat-header-actions">
+                {% if current_conversation %}
+                <button class="btn-icon" id="pin-conversation" aria-label="Pin conversation">
+                    <i data-feather="{% if current_conversation.is_pinned %}star{% else %}star{% endif %}"></i>
+                </button>
+                <button class="btn-icon" id="conversation-options" aria-label="Options">
+                    <i data-feather="more-vertical"></i>
+                </button>
+                {% endif %}
+            </div>
+        </header>
+
+        <div class="chat-messages" id="chat-messages">
+            {% if current_conversation and messages %}
+                {% for message in messages %}
+                    {% include "synde_web/components/message.html" with message=message %}
+                {% endfor %}
+            {% else %}
+                <!-- Welcome Screen -->
+                <div class="welcome-screen" id="welcome-screen">
+                    <div class="welcome-icon">🧬</div>
+                    <h2>Welcome to SynDe</h2>
+                    <p>Your AI-powered protein engineering assistant</p>
+
+                    <div class="welcome-suggestions" id="welcome-suggestions">
+                        <!-- Suggestions loaded dynamically -->
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Suggestions -->
+        <div class="suggestions-bar" id="suggestions-bar">
+            {% include "synde_web/components/suggestions.html" %}
+        </div>
+
+        <!-- Input Area -->
+        <div class="chat-input-area">
+            <div class="input-container">
+                <button class="btn-icon attach-btn" id="attach-btn" aria-label="Attach file">
+                    <i data-feather="paperclip"></i>
+                </button>
+                <textarea
+                    class="chat-input"
+                    id="chat-input"
+                    placeholder="Ask about protein engineering..."
+                    rows="1"
+                    aria-label="Message input"
+                ></textarea>
+                <button class="btn btn-primary send-btn" id="send-btn" disabled aria-label="Send message">
+                    <i data-feather="send"></i>
+                </button>
+            </div>
+            <div class="input-footer">
+                <span class="input-hint">Press Enter to send, Shift+Enter for new line</span>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- 3D Viewer Modal -->
+{% include "synde_web/components/viewer_modal.html" %}
+
+<!-- Hidden data for JS -->
+<script type="application/json" id="page-data">
+{
+    "conversation_id": {% if current_conversation %}{{ current_conversation.id }}{% else %}null{% endif %},
+    "csrf_token": "{{ csrf_token }}",
+    "user_theme": "{{ user.theme }}"
+}
+</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'synde_web/js/sidebar.js' %}"></script>
+<script src="{% static 'synde_web/js/chat.js' %}"></script>
+<script src="{% static 'synde_web/js/sse.js' %}"></script>
+<script src="{% static 'synde_web/js/viewer.js' %}"></script>
+{% endblock %}

@@ -1,0 +1,136 @@
+{% extends "synde_web/base.html" %}
+{% load static %}
+
+{% block title %}Profile{% endblock %}
+
+{% block content %}
+<div class="profile-container">
+    <div class="profile-header">
+        <a href="{% url 'index' %}" class="back-link">
+            <i data-feather="arrow-left"></i>
+            Back to Chat
+        </a>
+        <h1>Profile Settings</h1>
+    </div>
+
+    {% if messages %}
+    <div class="profile-messages">
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <form class="profile-form" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        <!-- Avatar Section -->
+        <section class="profile-section">
+            <h2>Avatar</h2>
+            <div class="avatar-upload">
+                <div class="avatar-preview">
+                    {% if user.avatar %}
+                    <img src="{{ user.avatar.url }}" alt="Profile avatar">
+                    {% else %}
+                    <div class="avatar-placeholder">
+                        <i data-feather="user"></i>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="avatar-actions">
+                    <input type="file" id="avatar" name="avatar" accept="image/*" hidden>
+                    <button type="button" class="btn btn-secondary" onclick="document.getElementById('avatar').click()">
+                        Change Avatar
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Personal Info Section -->
+        <section class="profile-section">
+            <h2>Personal Information</h2>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="first_name">First Name</label>
+                    <input type="text" id="first_name" name="first_name"
+                           value="{{ user.first_name }}" placeholder="First name">
+                </div>
+                <div class="form-group">
+                    <label for="last_name">Last Name</label>
+                    <input type="text" id="last_name" name="last_name"
+                           value="{{ user.last_name }}" placeholder="Last name">
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="organization">Organization</label>
+                <input type="text" id="organization" name="organization"
+                       value="{{ user.organization }}" placeholder="Company or institution">
+            </div>
+
+            <div class="form-group">
+                <label for="bio">Bio</label>
+                <textarea id="bio" name="bio" rows="3" maxlength="500"
+                          placeholder="Tell us about yourself">{{ user.bio }}</textarea>
+                <span class="form-hint">Max 500 characters</span>
+            </div>
+        </section>
+
+        <!-- Preferences Section -->
+        <section class="profile-section">
+            <h2>Preferences</h2>
+
+            <div class="form-group">
+                <label for="theme">Theme</label>
+                <select id="theme" name="theme">
+                    <option value="system" {% if user.theme == 'system' %}selected{% endif %}>System</option>
+                    <option value="light" {% if user.theme == 'light' %}selected{% endif %}>Light</option>
+                    <option value="dark" {% if user.theme == 'dark' %}selected{% endif %}>Dark</option>
+                </select>
+            </div>
+        </section>
+
+        <!-- Usage Section -->
+        <section class="profile-section">
+            <h2>Usage</h2>
+
+            <div class="usage-stats">
+                <div class="usage-stat">
+                    <span class="usage-label">Monthly Quota</span>
+                    <span class="usage-value">{{ user.current_usage }} / {{ user.monthly_quota }}</span>
+                </div>
+                <div class="usage-bar">
+                    <div class="usage-progress" style="width: {{ usage_percent }}%"></div>
+                </div>
+            </div>
+
+            {% if user.api_key %}
+            <div class="form-group">
+                <label>API Key</label>
+                <div class="api-key-display">
+                    <code>{{ user.api_key|slice:":8" }}...{{ user.api_key|slice:"-4:" }}</code>
+                    <button type="button" class="btn btn-small btn-secondary" onclick="copyApiKey()">
+                        <i data-feather="copy"></i>
+                    </button>
+                </div>
+            </div>
+            {% endif %}
+        </section>
+
+        <div class="profile-actions">
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+            <a href="{% url 'logout' %}" class="btn btn-secondary">Sign Out</a>
+        </div>
+    </form>
+</div>
+
+<script>
+function copyApiKey() {
+    const key = "{{ user.api_key }}";
+    navigator.clipboard.writeText(key).then(() => {
+        alert('API key copied to clipboard');
+    });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,79 @@
+<!-- 3D Protein Viewer Modal -->
+<div class="modal" id="viewer-modal" role="dialog" aria-labelledby="viewer-modal-title" aria-hidden="true">
+    <div class="modal-backdrop" id="viewer-modal-backdrop"></div>
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h2 id="viewer-modal-title">Protein Structure</h2>
+            <div class="modal-header-actions">
+                <select id="viewer-style" class="select-small">
+                    <option value="cartoon">Cartoon</option>
+                    <option value="stick">Stick</option>
+                    <option value="sphere">Sphere</option>
+                    <option value="line">Line</option>
+                    <option value="surface">Surface</option>
+                </select>
+                <select id="viewer-color" class="select-small">
+                    <option value="spectrum">Rainbow</option>
+                    <option value="chain">By Chain</option>
+                    <option value="secondary">Secondary Structure</option>
+                    <option value="residue">By Residue</option>
+                    <option value="bfactor">pLDDT Score</option>
+                </select>
+                <button class="btn-icon" id="viewer-fullscreen" aria-label="Fullscreen">
+                    <i data-feather="maximize-2"></i>
+                </button>
+                <button class="btn-icon modal-close" aria-label="Close">
+                    <i data-feather="x"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="modal-body">
+            <div id="viewer-container" class="viewer-container">
+                <!-- 3Dmol viewer will be rendered here -->
+            </div>
+
+            <div class="viewer-info" id="viewer-info">
+                <div class="viewer-info-item">
+                    <span class="info-label">Residues:</span>
+                    <span class="info-value" id="viewer-residues">-</span>
+                </div>
+                <div class="viewer-info-item">
+                    <span class="info-label">Chains:</span>
+                    <span class="info-value" id="viewer-chains">-</span>
+                </div>
+                <div class="viewer-info-item" id="viewer-plddt-container" style="display: none;">
+                    <span class="info-label">Avg pLDDT:</span>
+                    <span class="info-value" id="viewer-plddt">-</span>
+                </div>
+            </div>
+
+            <!-- Pocket highlighting -->
+            <div class="viewer-pockets" id="viewer-pockets" style="display: none;">
+                <h4>Binding Pockets</h4>
+                <div class="pocket-list" id="pocket-list">
+                    <!-- Pocket items will be added dynamically -->
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn btn-secondary" id="viewer-download">
+                <i data-feather="download"></i>
+                Download PDB
+            </button>
+            <button class="btn btn-secondary" id="viewer-screenshot">
+                <i data-feather="camera"></i>
+                Screenshot
+            </button>
+            <button class="btn btn-secondary" id="viewer-spin">
+                <i data-feather="refresh-cw"></i>
+                Spin
+            </button>
+            <button class="btn btn-secondary" id="viewer-reset">
+                <i data-feather="home"></i>
+                Reset View
+            </button>
+        </div>
+    </div>
+</div>

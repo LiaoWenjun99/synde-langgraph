@@ -1,0 +1,30 @@
+/* Dark theme */
+[data-theme="dark"] {
+    /* Backgrounds */
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-hover: #334155;
+    --bg-active: #475569;
+
+    /* Text */
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #64748b;
+
+    /* Borders */
+    --border-color: #334155;
+
+    /* Code */
+    --code-bg: #1e293b;
+    --code-text: #f8fafc;
+}
+
+/* Dark mode specific adjustments */
+[data-theme="dark"] .auth-card,
+[data-theme="dark"] .modal-content {
+    border: 1px solid var(--border-color);
+}
+
+[data-theme="dark"] .avatar-assistant {
+    background: var(--bg-hover);
+}
