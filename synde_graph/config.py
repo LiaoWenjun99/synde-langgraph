@@ -42,13 +42,13 @@ CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", f"{REDIS_URL}/1")
 class GpuTimeouts:
     """Timeout settings for GPU tasks."""
 
-    ESMFOLD = int(os.getenv("TIMEOUT_ESMFOLD", "1800"))  # 30 minutes
+    ESMFOLD = int(os.getenv("TIMEOUT_ESMFOLD", "180"))  # 30 minutes
     ALPHAFOLD = int(os.getenv("TIMEOUT_ALPHAFOLD", "3600"))  # 60 minutes
-    CLEAN_EC = int(os.getenv("TIMEOUT_CLEAN_EC", "1800"))  # 30 minutes
-    DEEPENZYME = int(os.getenv("TIMEOUT_DEEPENZYME", "1800"))  # 30 minutes
-    TEMBERTURE = int(os.getenv("TIMEOUT_TEMBERTURE", "1800"))  # 30 minutes
+    CLEAN_EC = int(os.getenv("TIMEOUT_CLEAN_EC", "180"))  # 30 minutes
+    DEEPENZYME = int(os.getenv("TIMEOUT_DEEPENZYME", "180"))  # 30 minutes
+    TEMBERTURE = int(os.getenv("TIMEOUT_TEMBERTURE", "180"))  # 30 minutes
     FLAN_EXTRACTOR = int(os.getenv("TIMEOUT_FLAN", "180"))  # 3 minutes
-    FPOCKET = int(os.getenv("TIMEOUT_FPOCKET", "300"))  # 5 minutes
+    FPOCKET = int(os.getenv("TIMEOUT_FPOCKET", "180"))  # 3 minutes
 
     # Polling intervals
     POLL_INTERVAL = int(os.getenv("GPU_POLL_INTERVAL", "5"))  # seconds
