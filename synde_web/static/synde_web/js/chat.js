@@ -7,6 +7,7 @@ const Chat = {
     inputElement: null,
     sendButton: null,
     activeWorkflowId: null,
+    uploadedFile: null,  // Track uploaded file
 
     init() {
         this.messagesContainer = document.getElementById('chat-messages');
@@ -21,6 +22,9 @@ const Chat = {
         // Set up send button
         this.sendButton.addEventListener('click', () => this.sendMessage());
 
+        // Set up file upload
+        this.setupFileUpload();
+
         // Set up suggestion chips
         this.setupSuggestions();
 
@@ -32,6 +36,183 @@ const Chat = {
 
         // Check for active workflows
         this.checkActiveWorkflows();
+    },
+
+    setupFileUpload() {
+        const attachBtn = document.getElementById('attach-btn');
+        if (!attachBtn) {
+            console.warn('File upload: attach-btn not found');
+            return;
+        }
+
+        console.log('Setting up file upload functionality');
+
+        // Create hidden file input
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.pdb,.fasta,.fa,.faa,.fas,.txt';
+        fileInput.style.display = 'none';
+        fileInput.id = 'file-input';
+        document.body.appendChild(fileInput);
+
+        // Attach button click - use both click and pointerdown for better compatibility
+        attachBtn.addEventListener('click', (e) => {
+            console.log('Attach button clicked');
+            e.preventDefault();
+            e.stopPropagation();
+            fileInput.click();
+        });
+
+        // Also add keyboard accessibility
+        attachBtn.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInput.click();
+            }
+        });
+
+        // File selected
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            await this.uploadFile(file);
+            fileInput.value = ''; // Reset input
+        });
+
+        // Drag and drop
+        const inputArea = document.querySelector('.chat-input-area');
+        if (inputArea) {
+            inputArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                inputArea.classList.add('drag-over');
+            });
+
+            inputArea.addEventListener('dragleave', () => {
+                inputArea.classList.remove('drag-over');
+            });
+
+            inputArea.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                inputArea.classList.remove('drag-over');
+
+                const file = e.dataTransfer.files[0];
+                if (file) {
+                    await this.uploadFile(file);
+                }
+            });
+        }
+    },
+
+    async uploadFile(file) {
+        // Validate file type
+        const validExtensions = ['.pdb', '.fasta', '.fa', '.faa', '.fas', '.txt'];
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+
+        if (!validExtensions.includes(ext)) {
+            App.notify('Invalid file type. Supported: PDB, FASTA', 'error');
+            return;
+        }
+
+        // Validate file size (10MB max)
+        if (file.size > 10 * 1024 * 1024) {
+            App.notify('File too large. Maximum size is 10MB', 'error');
+            return;
+        }
+
+        // Upload file
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch('/api/upload/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': App.csrfToken
+                },
+                body: formData
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Upload failed');
+            }
+
+            // Store uploaded file info
+            this.uploadedFile = {
+                file_id: data.file_id,
+                file_type: data.file_type,
+                filename: data.filename,
+                sequences: data.sequences,
+                metadata: data.metadata
+            };
+
+            // Show file attachment indicator
+            this.showFileAttachment(data);
+
+            // Enable send button if we have a file
+            this.sendButton.disabled = false;
+
+            App.notify(`File uploaded: ${data.filename}`, 'info');
+
+        } catch (error) {
+            App.notify('Upload failed: ' + error.message, 'error');
+        }
+    },
+
+    showFileAttachment(fileData) {
+        // Remove existing attachment indicator
+        const existing = document.querySelector('.file-attachment');
+        if (existing) existing.remove();
+
+        // Create attachment indicator
+        const indicator = document.createElement('div');
+        indicator.className = 'file-attachment';
+
+        let details = '';
+        if (fileData.file_type === 'pdb') {
+            details = `${fileData.metadata.atom_count} atoms, ${fileData.metadata.residue_count} residues`;
+        } else if (fileData.sequences) {
+            const seqCount = Object.keys(fileData.sequences).length;
+            details = `${seqCount} sequence${seqCount > 1 ? 's' : ''}`;
+        }
+
+        indicator.innerHTML = `
+            <div class="file-attachment-info">
+                <i data-feather="${fileData.file_type === 'pdb' ? 'box' : 'file-text'}"></i>
+                <span class="file-name">${fileData.filename}</span>
+                <span class="file-details">${details}</span>
+            </div>
+            <button class="btn-icon file-remove" aria-label="Remove file">
+                <i data-feather="x"></i>
+            </button>
+        `;
+
+        // Insert before input container
+        const inputArea = document.querySelector('.chat-input-area');
+        const inputContainer = inputArea.querySelector('.input-container');
+        inputArea.insertBefore(indicator, inputContainer);
+
+        // Initialize icons
+        if (typeof feather !== 'undefined') {
+            feather.replace();
+        }
+
+        // Remove button handler
+        indicator.querySelector('.file-remove').addEventListener('click', () => {
+            this.clearFileAttachment();
+        });
+    },
+
+    clearFileAttachment() {
+        this.uploadedFile = null;
+        const indicator = document.querySelector('.file-attachment');
+        if (indicator) indicator.remove();
+
+        // Disable send if no text
+        const hasContent = this.inputElement.value.trim().length > 0;
+        this.sendButton.disabled = !hasContent;
     },
 
     setupInput() {
@@ -60,7 +241,7 @@ const Chat = {
 
     async sendMessage() {
         const content = this.inputElement.value.trim();
-        if (!content) return;
+        if (!content && !this.uploadedFile) return;
 
         // Check if we have a conversation
         let conversationId = App.conversationId;
@@ -83,7 +264,17 @@ const Chat = {
             }
         }
 
-        // Clear input
+        // Build display content with file info
+        let displayContent = content;
+        if (this.uploadedFile) {
+            if (content) {
+                displayContent += `\n[Attached: ${this.uploadedFile.filename}]`;
+            } else {
+                displayContent = `Analyze uploaded file: ${this.uploadedFile.filename}`;
+            }
+        }
+
+        // Clear input and file
         this.inputElement.value = '';
         this.sendButton.disabled = true;
         this.autoResize();
@@ -97,15 +288,37 @@ const Chat = {
         // Add user message to UI
         this.addMessage({
             role: 'user',
-            content: content,
+            content: displayContent,
             created_at: new Date().toISOString()
         });
+
+        // Build request body
+        const requestBody = {
+            content: content || `Analyze the uploaded ${this.uploadedFile?.file_type?.toUpperCase()} file`
+        };
+
+        // Add file info if present
+        if (this.uploadedFile) {
+            requestBody.file_id = this.uploadedFile.file_id;
+            requestBody.file_type = this.uploadedFile.file_type;
+
+            // If FASTA with sequence, include first sequence
+            if (this.uploadedFile.sequences) {
+                const firstSeq = Object.values(this.uploadedFile.sequences)[0];
+                if (firstSeq) {
+                    requestBody.sequence = firstSeq.sequence;
+                }
+            }
+        }
+
+        // Clear file attachment
+        this.clearFileAttachment();
 
         try {
             // Send message to API
             const response = await App.api(`/api/conversations/${conversationId}/messages/`, {
                 method: 'POST',
-                body: JSON.stringify({ content })
+                body: JSON.stringify(requestBody)
             });
 
             // Add assistant message placeholder
@@ -167,10 +380,12 @@ const Chat = {
                 <div class="message-body">
                     ${isWorkflowPending
                         ? `<div class="workflow-status" data-workflow-id="${message.workflow_id}">
-                               <div class="workflow-spinner"><div class="spinner"></div></div>
-                               <div class="workflow-info">
-                                   <span class="workflow-stage">Processing...</span>
-                                   <span class="workflow-detail" id="workflow-detail-${message.workflow_id}">Starting workflow</span>
+                               <div class="workflow-status-header">
+                                   <div class="workflow-spinner"><div class="spinner"></div></div>
+                                   <div class="workflow-info">
+                                       <span class="workflow-stage">Processing...</span>
+                                       <span class="workflow-detail" id="workflow-detail-${message.workflow_id}">Starting workflow</span>
+                                   </div>
                                </div>
                            </div>`
                         : message.workflow_status === 'failed'
@@ -207,6 +422,38 @@ const Chat = {
         if (status === 'node' && data.node) {
             if (stageEl) stageEl.textContent = 'Processing...';
             if (detailEl) detailEl.textContent = `Running: ${data.node}`;
+        }
+    },
+
+    updateWorkflowLogs(workflowId, logs) {
+        const statusEl = document.querySelector(`.workflow-status[data-workflow-id="${workflowId}"]`);
+        if (!statusEl) return;
+
+        // Get or create logs container
+        let logsContainer = statusEl.querySelector('.workflow-logs');
+        if (!logsContainer) {
+            logsContainer = document.createElement('div');
+            logsContainer.className = 'workflow-logs';
+            statusEl.appendChild(logsContainer);
+        }
+
+        // Append new logs
+        logs.forEach(log => {
+            const logEl = document.createElement('div');
+            logEl.className = 'workflow-log-entry';
+            logEl.textContent = log.msg;
+            logsContainer.appendChild(logEl);
+        });
+
+        // Scroll to bottom of logs
+        logsContainer.scrollTop = logsContainer.scrollHeight;
+
+        // Update the detail text with the latest log
+        if (logs.length > 0) {
+            const detailEl = statusEl.querySelector('.workflow-detail');
+            if (detailEl) {
+                detailEl.textContent = logs[logs.length - 1].msg;
+            }
         }
     },
 

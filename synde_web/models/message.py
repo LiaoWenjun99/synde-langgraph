@@ -143,5 +143,43 @@ class Message(models.Model):
                 'mutant_pdb': response.get('mutant_pdb'),
             }
 
+        # Set message content from natural_reply
+        natural_reply = response.get('natural_reply', '')
+        if natural_reply:
+            self.content = natural_reply
+
+        # Also include parsed_input info for display
+        parsed_input = result.get('parsed_input', {})
+        if parsed_input:
+            task = parsed_input.get('task', 'prediction')
+            properties = parsed_input.get('properties', [])
+
+            # Build a summary content if no natural_reply
+            if not natural_reply:
+                parts = [f"Identified Task: {task}"]
+                if properties:
+                    parts.append(f"Identified Properties: {', '.join(properties)}")
+                self.content = '\n'.join(parts)
+
+        # Add structure info to content
+        if protein.get('structure_source'):
+            self.content += f"\n\nStructure Source: {protein.get('structure_source')}"
+        if protein.get('avg_plddt'):
+            self.content += f"\nAverage pLDDT: {protein.get('avg_plddt'):.2f}"
+
+        # Add prediction results to content
+        predictions = result.get('predictions', {})
+        if predictions:
+            self.content += "\n\nPrediction Results:"
+            if predictions.get('ec_number'):
+                ec = predictions['ec_number']
+                self.content += f"\n- EC Number: {ec.get('ec_number')} (probability: {ec.get('probability', 0):.2%})"
+            if predictions.get('tm'):
+                tm = predictions['tm']
+                self.content += f"\n- Melting Temperature (Tm): {tm.get('melting_temperature', 0):.1f}°C ({tm.get('thermo_class', 'N/A')})"
+            if predictions.get('kcat'):
+                kcat = predictions['kcat']
+                self.content += f"\n- kcat: {kcat.get('kcat', 0):.2f} s⁻¹"
+
         self.workflow_status = 'completed'
         self.save()

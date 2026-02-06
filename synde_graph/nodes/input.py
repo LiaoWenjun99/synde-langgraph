@@ -23,6 +23,8 @@ from synde_gpu.tasks import call_flan_extractor
 from synde_gpu.manager import GpuTaskManager, TaskStatus
 from synde_gpu.mocks import is_mock_mode
 from synde_graph.config import GpuTimeouts
+from synde_graph.utils.live_logger import report, report_node_start, report_node_complete
+from synde_graph.utils.smiles_fetcher import get_smiles
 
 
 # SMILES character set for validation
@@ -45,6 +47,8 @@ def input_parser_node(state: SynDeGraphState) -> Dict[str, Any]:
     Returns:
         State update with parsed input, protein data, and ligand data
     """
+    report_node_start("Input Parser", "Extracting task and properties")
+
     user_query = state.get("user_query", "")
     uploaded_pdb_path = state.get("uploaded_pdb_path")
     uploaded_pdb_content = state.get("uploaded_pdb_content")
@@ -161,8 +165,10 @@ def input_parser_node(state: SynDeGraphState) -> Dict[str, Any]:
             if all(c in SMILES_CHARS for c in lig_str) and len(lig_str) > 5:
                 ligand_smiles = lig_str
             else:
-                # Look up in common ligands
-                ligand_smiles = _get_common_ligand_smiles(lig_str)
+                # Resolve name to SMILES (hardcoded table + PubChem API)
+                ligand_smiles = get_smiles(lig_str)
+                if ligand_smiles == "NaN":
+                    ligand_smiles = None
 
     # =========================================================================
     # Step 10: Check ligand requirement
@@ -199,6 +205,18 @@ def input_parser_node(state: SynDeGraphState) -> Dict[str, Any]:
         ligand_input=ligand_input[0] if isinstance(ligand_input, list) and ligand_input else ligand_input,
         ligand_smiles=ligand_smiles,
     )
+
+    # Report what was detected
+    report(f"📋 Task: {task}, Properties: {', '.join(properties)}")
+    if protein_sequence:
+        report(f"🧬 Sequence detected ({len(protein_sequence)} aa)")
+    if ligand_smiles:
+        report(f"🧪 Ligand resolved to SMILES ({len(ligand_smiles)} chars)")
+    elif needs_ligand:
+        report(f"⚠️ No ligand/substrate provided — kcat prediction will be skipped")
+    if uploaded_pdb_path:
+        report(f"📁 Using uploaded PDB structure")
+    report_node_complete("Input Parser")
 
     return {
         "parsed_input": parsed_input,
@@ -279,11 +297,27 @@ def _minimal_parse(query: str) -> Tuple:
 
     # Detect ligands
     ligand = None
-    common_ligands = ["atp", "adp", "nadh", "nad+", "fad", "glucose", "pyruvate"]
+    common_ligands = [
+        "atp", "adp", "nadh", "nad+", "fad", "glucose", "pyruvate",
+        "succinate", "lactate", "acetyl-coa", "glutamate", "aspartate",
+        "citrate", "oxaloacetate", "fumarate", "malate", "gtp", "gdp",
+        "udp", "ump", "ctp", "cdp", "amp", "nadph", "nadp+",
+        "coenzyme a", "coa", "acetate",
+    ]
     for lig in common_ligands:
         if lig in query_lower:
             ligand = lig.upper()
             break
+
+    # Also check for SMILES patterns in the query (strings with special chars)
+    if not ligand:
+        import re as _re
+        smiles_candidates = _re.findall(r'[A-Za-z0-9@\+\-\[\]\(\)=#/\\]{10,}', query)
+        for candidate in smiles_candidates:
+            # Check if it looks like SMILES (has typical SMILES characters)
+            if any(c in candidate for c in ['=', '#', '(', ')', '[', ']', '/', '\\']):
+                ligand = candidate
+                break
 
     return (task, properties, [], uniprot_ids, protein_sequence, ligand, [])
 
@@ -325,28 +359,6 @@ def _extract_sequence_from_pdb(pdb_content: str) -> Optional[str]:
         return ''.join(r[1] for r in residues)
 
     return None
-
-
-def _get_common_ligand_smiles(ligand_name: str) -> Optional[str]:
-    """
-    Get SMILES for common ligands.
-
-    Args:
-        ligand_name: Ligand name
-
-    Returns:
-        SMILES string or None
-    """
-    common_ligands = {
-        "ATP": "C1=NC2=C(C(=N1)N)N=CN2C3C(C(C(O3)COP(=O)(O)OP(=O)(O)OP(=O)(O)O)O)O",
-        "ADP": "C1=NC2=C(C(=N1)N)N=CN2C3C(C(C(O3)COP(=O)(O)OP(=O)(O)O)O)O",
-        "GLUCOSE": "OC[C@H]1OC(O)[C@H](O)[C@@H](O)[C@@H]1O",
-        "NADH": "NC(=O)c1ccc[n+](C2OC(COP(=O)(O)OP(=O)(O)OCC3OC(n4cnc5c(N)ncnc54)C(O)C3O)C(O)C2O)c1",
-        "FAD": "CC1=CC2=C(C=C1C)N(C3=NC(=O)NC(=O)C3=N2)CC(C(C(COP(=O)(O)OP(=O)(O)OCC4C(C(C(O4)N5C=NC6=C(N=CN=C65)N)O)O)O)O)O",
-        "PYRUVATE": "CC(=O)C(=O)O",
-    }
-
-    return common_ligands.get(ligand_name.upper())
 
 
 # =============================================================================

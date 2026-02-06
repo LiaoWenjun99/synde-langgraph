@@ -34,6 +34,12 @@ const SSE = {
                 Chat.updateWorkflowStatus(workflowId, 'status', data);
             });
 
+            this.eventSource.addEventListener('logs', (e) => {
+                const data = JSON.parse(e.data);
+                console.log('SSE logs:', data);
+                Chat.updateWorkflowLogs(workflowId, data.logs);
+            });
+
             this.eventSource.addEventListener('complete', (e) => {
                 const data = JSON.parse(e.data);
                 console.log('SSE complete:', data);

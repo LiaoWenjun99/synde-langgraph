@@ -8,6 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404
 
 from synde_web.models import Conversation, Message, WorkflowCheckpoint
+from synde_graph.utils.live_logger import get_logs
 
 
 @require_GET
@@ -45,6 +46,7 @@ def workflow_stream(request, conversation_id, workflow_id):
         """Generate SSE events for workflow progress."""
         last_node = None
         last_status = None
+        last_log_index = 0
         poll_count = 0
         max_polls = 600  # 5 minutes with 0.5s interval
 
@@ -59,6 +61,13 @@ def workflow_stream(request, conversation_id, workflow_id):
             try:
                 # Refresh checkpoint from DB
                 checkpoint.refresh_from_db()
+
+                # Send new logs if any
+                logs, last_log_index = get_logs(workflow_id, last_log_index)
+                if logs:
+                    yield format_sse('logs', {
+                        'logs': logs
+                    })
 
                 # Send node update if changed
                 if checkpoint.current_node != last_node:

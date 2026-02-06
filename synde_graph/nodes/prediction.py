@@ -22,6 +22,7 @@ from synde_gpu.tasks import (
 )
 from synde_gpu.manager import GpuTaskManager, TaskStatus
 from synde_gpu.mocks import is_mock_mode
+from synde_graph.utils.live_logger import report, report_gpu_task
 
 
 # =============================================================================
@@ -83,6 +84,7 @@ def run_esmfold_node(state: SynDeGraphState) -> Dict[str, Any]:
         }
 
     try:
+        report_gpu_task("ESMFold", f"Predicting structure ({len(sequence)} aa)")
         manager = GpuTaskManager(task_name="ESMFold")
         result = manager.execute_sync(call_esmfold, args=(job_id, sequence))
 
@@ -92,6 +94,8 @@ def run_esmfold_node(state: SynDeGraphState) -> Dict[str, Any]:
                 pdb_file_path = fold_res.get("pdb_path")
                 pdb_data = fold_res.get("pdb_data")
                 avg_plddt = fold_res.get("avg_plddt")
+
+                report_gpu_task("ESMFold", f"Complete (pLDDT: {avg_plddt:.1f})" if avg_plddt else "Complete")
 
                 return {
                     "protein": {
@@ -104,6 +108,7 @@ def run_esmfold_node(state: SynDeGraphState) -> Dict[str, Any]:
                     **update_node_history(state, "run_esmfold"),
                 }
 
+        report_gpu_task("ESMFold", f"Failed: {result.error or 'Unknown error'}")
         raise RuntimeError(f"ESMFold failed: {result.error or 'Unknown error'}")
 
     except Exception as e:
@@ -286,37 +291,98 @@ def run_clean_ec_node(state: SynDeGraphState) -> Dict[str, Any]:
     """
     Run CLEAN for EC number prediction.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     protein = state.get("protein", {})
     sequence = protein.get("sequence")
 
+    logger.info(f"run_clean_ec_node: sequence length = {len(sequence) if sequence else 0}")
+
     if not sequence:
+        logger.warning("No sequence available for EC prediction")
         return update_node_history(state, "run_clean_ec")
 
     try:
+        report_gpu_task("CLEAN EC", "Predicting enzyme class")
         manager = GpuTaskManager(task_name="CLEAN_EC")
         result = manager.execute_sync(call_clean_ec, args=(sequence, "Input_Seq"))
 
+        logger.info(f"CLEAN EC result status: {result.status}")
+        logger.info(f"CLEAN EC result data: {result.result}")
+
         if result.status == TaskStatus.SUCCESS:
             ec_result = result.result
-            if isinstance(ec_result, dict) and ec_result.get("status") == "success":
-                ec_number = ec_result.get("ec_number")
-                probability = ec_result.get("probability")
 
+            # Handle different result formats
+            ec_number = None
+            probability = None
+
+            if isinstance(ec_result, dict):
+                # Check for status field (standard format)
+                if ec_result.get("status") == "success" or "ec_number" in ec_result:
+                    ec_number = ec_result.get("ec_number")
+                    probability = ec_result.get("probability", 0.0)
+                # Check for alternative formats
+                elif "result" in ec_result:
+                    inner = ec_result["result"]
+                    ec_number = inner.get("ec_number")
+                    probability = inner.get("probability", 0.0)
+
+            logger.info(f"Extracted EC: {ec_number}, probability: {probability}")
+
+            if ec_number:
                 response = state.get("response", {})
                 response_html = response.get("response_html", "")
+
+                # Format probability safely
+                prob_str = f"{probability:.3f}" if isinstance(probability, (int, float)) else str(probability)
                 response_html += (
                     f"<strong>CLEAN EC Number:</strong> {ec_number}<br>"
-                    f"<strong>Probability:</strong> {probability:.3f}<br>"
+                    f"<strong>Probability:</strong> {prob_str}<br>"
                 )
+
+                # Also add to predictions dict for structured access
+                predictions = state.get("predictions", {})
+                predictions["ec_number"] = {
+                    "ec_number": ec_number,
+                    "probability": probability,
+                }
+
+                report_gpu_task("CLEAN EC", f"Complete: {ec_number} (prob: {prob_str})")
+                logger.info(f"EC prediction added to response_html")
+                return {
+                    "response": {**response, "response_html": response_html},
+                    "predictions": predictions,
+                    **update_node_history(state, "run_clean_ec"),
+                }
+            else:
+                # Check if it's an error response
+                error_msg = ec_result.get("message", "Unknown error") if isinstance(ec_result, dict) else str(ec_result)
+                logger.warning(f"EC number not found in result: {ec_result}")
+
+                # Add error message to response
+                response = state.get("response", {})
+                response_html = response.get("response_html", "")
+                response_html += f"<strong>EC Prediction Error:</strong> {error_msg}<br>"
 
                 return {
                     "response": {**response, "response_html": response_html},
                     **update_node_history(state, "run_clean_ec"),
+                    **add_error(
+                        state, "run_clean_ec",
+                        RuntimeError(f"CLEAN EC prediction failed: {error_msg}"),
+                        recoverable=True
+                    ),
                 }
+
+        else:
+            logger.error(f"CLEAN EC task failed: {result.error}")
 
         return update_node_history(state, "run_clean_ec")
 
     except Exception as e:
+        logger.error(f"Exception in run_clean_ec_node: {e}", exc_info=True)
         return {
             **update_node_history(state, "run_clean_ec"),
             **add_error(state, "run_clean_ec", e, recoverable=True),
@@ -336,9 +402,34 @@ def run_deepenzyme_node(state: SynDeGraphState) -> Dict[str, Any]:
     ligand_smiles = ligand.get("ligand_smiles")
 
     if not sequence or not pdb_file_path or not ligand_smiles:
-        return update_node_history(state, "run_deepenzyme")
+        # Report exactly what's missing so the user knows what to provide
+        missing = []
+        if not sequence:
+            missing.append("protein sequence")
+        if not pdb_file_path:
+            missing.append("PDB structure")
+        if not ligand_smiles:
+            missing.append("ligand/substrate SMILES")
+        missing_str = ", ".join(missing)
+
+        report(f"⚠️ DeepEnzyme kcat prediction skipped — missing: {missing_str}")
+
+        # Add a visible message to the response so the user sees it in the UI
+        response = state.get("response", {})
+        response_html = response.get("response_html", "")
+        response_html += (
+            f"<strong>DeepEnzyme kcat:</strong> Skipped — requires {missing_str}.<br>"
+            f"<em>Tip: Include a substrate name (e.g. ATP, glucose, pyruvate) "
+            f"or SMILES string in your query to enable kcat prediction.</em><br>"
+        )
+
+        return {
+            "response": {**response, "response_html": response_html},
+            **update_node_history(state, "run_deepenzyme"),
+        }
 
     try:
+        report_gpu_task("DeepEnzyme", "Predicting kcat")
         manager = GpuTaskManager(task_name="DeepEnzyme")
         result = manager.execute_sync(
             call_deepenzyme,
@@ -349,6 +440,8 @@ def run_deepenzyme_node(state: SynDeGraphState) -> Dict[str, Any]:
             de_result = result.result
             if isinstance(de_result, dict) and de_result.get("status") == "success":
                 kcat = de_result.get("kcat")
+
+                report_gpu_task("DeepEnzyme", f"Complete: kcat = {kcat} s⁻¹")
 
                 response = state.get("response", {})
                 response_html = response.get("response_html", "")
@@ -379,6 +472,7 @@ def run_temberture_node(state: SynDeGraphState) -> Dict[str, Any]:
         return update_node_history(state, "run_temberture")
 
     try:
+        report_gpu_task("TemBERTure", "Predicting melting temperature")
         manager = GpuTaskManager(task_name="TemBERTure")
         result = manager.execute_sync(call_temberture, args=(sequence,))
 
@@ -387,6 +481,8 @@ def run_temberture_node(state: SynDeGraphState) -> Dict[str, Any]:
             if isinstance(temp_result, dict) and temp_result.get("status") == "success":
                 tm = temp_result.get("melting_temperature")
                 thermo_class = temp_result.get("thermo_class")
+
+                report_gpu_task("TemBERTure", f"Complete: Tm = {tm:.1f}°C ({thermo_class})")
 
                 response = state.get("response", {})
                 response_html = response.get("response_html", "")

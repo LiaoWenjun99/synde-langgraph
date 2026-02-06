@@ -249,8 +249,18 @@ def send_message(request, conversation_id):
 
     Creates a user message, starts the LangGraph workflow,
     and returns the workflow ID for SSE streaming.
+
+    Accepts JSON with:
+    - content: Message text
+    - file_id: Optional uploaded file ID
+    - file_type: 'pdb' or 'fasta'
+    - sequence: Optional direct sequence input
+    - use_mock: Optional override for mock mode (default: from settings)
     """
     from synde_web.tasks import run_workflow
+    from synde_web.views.upload import get_uploaded_file
+    import os
+    from django.conf import settings
 
     conversation = get_object_or_404(
         Conversation, id=conversation_id, user=request.user
@@ -271,11 +281,53 @@ def send_message(request, conversation_id):
     if not content:
         return JsonResponse({'error': 'Message content required'}, status=400)
 
-    # Create user message
+    # Handle file uploads
+    file_id = data.get('file_id')
+    file_type = data.get('file_type')
+    uploaded_pdb_path = None
+    uploaded_pdb_content = None
+    uploaded_sequence = data.get('sequence')
+
+    if file_id:
+        if file_type == 'pdb':
+            pdb_path = os.path.join(settings.MEDIA_ROOT, 'uploads', 'pdb', f'{file_id}.pdb')
+            if os.path.exists(pdb_path):
+                uploaded_pdb_path = pdb_path
+                with open(pdb_path, 'r') as f:
+                    uploaded_pdb_content = f.read()
+        elif file_type == 'fasta':
+            fasta_path = os.path.join(settings.MEDIA_ROOT, 'uploads', 'fasta', f'{file_id}.fasta')
+            if os.path.exists(fasta_path):
+                # Parse first sequence from FASTA
+                from synde_web.views.upload import parse_fasta
+                with open(fasta_path, 'r') as f:
+                    sequences = parse_fasta(f.read())
+                if sequences:
+                    # Use first sequence
+                    uploaded_sequence = list(sequences.values())[0]
+
+    # Mock mode setting
+    use_mock = data.get('use_mock')
+    if use_mock is None:
+        use_mock = os.getenv('MOCK_GPU', 'true').lower() in ('true', '1', 'yes')
+
+    # Create user message with file info
+    user_message_content = content
+    if file_id:
+        if file_type == 'pdb':
+            user_message_content += f"\n[Attached PDB file: {file_id}]"
+        elif file_type == 'fasta':
+            user_message_content += f"\n[Attached FASTA file: {file_id}]"
+
     user_message = Message.objects.create(
         conversation=conversation,
         role='user',
-        content=content
+        content=user_message_content,
+        protein_data={
+            'file_id': file_id,
+            'file_type': file_type,
+            'sequence': uploaded_sequence[:100] + '...' if uploaded_sequence and len(uploaded_sequence) > 100 else uploaded_sequence,
+        } if file_id or uploaded_sequence else {}
     )
 
     # Generate workflow ID
@@ -301,13 +353,26 @@ def send_message(request, conversation_id):
         status='active'
     )
 
+    # Build context with file info
+    workflow_context = conversation.context.copy() if conversation.context else {}
+    if uploaded_sequence:
+        workflow_context['uploaded_sequence'] = uploaded_sequence
+    if uploaded_pdb_path:
+        workflow_context['uploaded_pdb_path'] = uploaded_pdb_path
+    if uploaded_pdb_content:
+        workflow_context['uploaded_pdb_content'] = uploaded_pdb_content
+
     # Start workflow task
     run_workflow.delay(
         workflow_id=workflow_id,
         user_query=content,
         conversation_id=conversation.id,
         message_id=assistant_message.id,
-        context=conversation.context
+        context=workflow_context,
+        uploaded_pdb_path=uploaded_pdb_path,
+        uploaded_pdb_content=uploaded_pdb_content,
+        uploaded_sequence=uploaded_sequence,
+        use_mock=use_mock
     )
 
     # Increment usage
@@ -417,3 +482,41 @@ def get_suggestions(request):
             pass
 
     return JsonResponse({'suggestions': suggestions})
+
+
+# =============================================================================
+# Workflow Logs API
+# =============================================================================
+
+@login_required
+@require_http_methods(["GET"])
+def workflow_logs(request, workflow_id):
+    """
+    Get live logs for a workflow.
+
+    Query params:
+        since: Index to start from (for incremental fetching)
+
+    Returns:
+        {
+            'logs': [{'ts': timestamp, 'msg': message}, ...],
+            'next_index': next index for incremental fetching
+        }
+    """
+    from synde_graph.utils.live_logger import get_logs
+
+    # Verify the workflow belongs to this user
+    checkpoint = get_object_or_404(
+        WorkflowCheckpoint,
+        job_id=workflow_id,
+        conversation__user=request.user
+    )
+
+    since = int(request.GET.get('since', 0))
+    logs, next_index = get_logs(workflow_id, since)
+
+    return JsonResponse({
+        'logs': logs,
+        'next_index': next_index,
+        'status': checkpoint.status,
+    })

@@ -3,6 +3,12 @@
 import logging
 from celery import shared_task
 
+from synde_graph.utils.live_logger import (
+    report,
+    set_current_job_id,
+    clear_logs,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -13,7 +19,11 @@ def run_workflow(
     user_query: str,
     conversation_id: int,
     message_id: int,
-    context: dict = None
+    context: dict = None,
+    uploaded_pdb_path: str = None,
+    uploaded_pdb_content: str = None,
+    uploaded_sequence: str = None,
+    use_mock: bool = True
 ):
     """
     Run LangGraph workflow as a Celery task.
@@ -24,12 +34,26 @@ def run_workflow(
         conversation_id: Associated conversation ID
         message_id: Assistant message ID to update
         context: Conversation context (previous state)
+        uploaded_pdb_path: Path to uploaded PDB file
+        uploaded_pdb_content: Content of uploaded PDB file
+        uploaded_sequence: Uploaded protein sequence
+        use_mock: Whether to use mock GPU responses
     """
+    import os
     from django.db import transaction
     from synde_web.models import Message, Conversation, WorkflowCheckpoint
     from synde_graph.graph import run_workflow as execute_graph
 
-    logger.info(f"Starting workflow {workflow_id} for conversation {conversation_id}")
+    # Set mock mode environment variable
+    os.environ['MOCK_GPU'] = 'true' if use_mock else 'false'
+
+    # Set up live logging context
+    set_current_job_id(workflow_id)
+    clear_logs(workflow_id)  # Clear any old logs
+    report("🚀 Workflow started")
+    report(f"Query: {user_query[:100]}..." if len(user_query) > 100 else f"Query: {user_query}")
+
+    logger.info(f"Starting workflow {workflow_id} for conversation {conversation_id} (mock={use_mock})")
 
     try:
         # Get the checkpoint and message
@@ -43,11 +67,24 @@ def run_workflow(
         message.workflow_status = 'running'
         message.save(update_fields=['workflow_status', 'updated_at'])
 
+        # Build session data with uploaded files
+        session_data = context or {}
+        if uploaded_sequence:
+            session_data['uploaded_sequence'] = uploaded_sequence
+            report("📎 Using uploaded sequence")
+
+        if uploaded_pdb_path:
+            report("📎 Using uploaded PDB structure")
+
+        report("🔄 Running workflow graph...")
+
         # Run the workflow
         result = execute_graph(
             user_query=user_query,
             job_id=workflow_id,
-            session_data=context or {}
+            uploaded_pdb_path=uploaded_pdb_path,
+            uploaded_pdb_content=uploaded_pdb_content,
+            session_data=session_data
         )
 
         # Update checkpoint with final state
@@ -73,9 +110,11 @@ def run_workflow(
             # Mark checkpoint completed
             checkpoint.mark_completed()
 
+        report("✅ Workflow completed successfully")
         logger.info(f"Workflow {workflow_id} completed successfully")
 
     except Exception as e:
+        report(f"❌ Workflow failed: {str(e)}")
         logger.exception(f"Workflow {workflow_id} failed: {e}")
 
         # Update checkpoint with error

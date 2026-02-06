@@ -26,9 +26,9 @@ app.conf.task_routes = {
     'home.tasks.run_progen2_job': {'queue': 'gpu'},
     'home.tasks.run_zymctrl_job': {'queue': 'gpu'},
 
-    # Workflow task (CPU queue)
-    'synde_web.tasks.run_workflow': {'queue': 'default'},
-    'synde_web.tasks.cleanup_expired_checkpoints': {'queue': 'default'},
+    # Workflow task (default celery queue)
+    'synde_web.tasks.run_workflow': {'queue': 'celery'},
+    'synde_web.tasks.cleanup_expired_checkpoints': {'queue': 'celery'},
 }
 
 # Beat schedule for periodic tasks

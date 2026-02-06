@@ -13,6 +13,7 @@ from typing import Dict, Any
 from langgraph.graph import StateGraph, END
 
 from synde_graph.state.schema import SynDeGraphState
+from synde_graph.utils.live_logger import report, report_node_start, report_node_complete
 from synde_graph.nodes.prediction import (
     check_structure_node,
     run_esmfold_node,
@@ -230,43 +231,87 @@ def run_all_predictions_node(state: SynDeGraphState) -> Dict[str, Any]:
 
     This is a simplified approach that runs all properties in one node.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     parsed_input = state.get("parsed_input", {})
     properties = parsed_input.get("properties", [])
+
+    logger.info(f"run_all_predictions_node: properties={properties}")
+    report_node_start("Property Predictions", f"Running {', '.join(properties)}")
 
     updates = {}
     current_state = state.copy()
 
+    # Track which predictions ran and their results
+    predictions_run = []
+    predictions_results = {}
+
     for prop in properties:
         prop_lower = prop.lower()
+        logger.info(f"Processing property: {prop_lower}")
 
         try:
             if prop_lower in ["stability", "mutation_effect"]:
+                logger.info("Running FoldX for stability")
                 result = run_foldx_node(current_state)
                 updates = {**updates, **result}
                 current_state = {**current_state, **result}
+                predictions_run.append("stability")
 
             elif prop_lower in ["optimum_temperature", "topt"]:
+                logger.info("Running Tomer for topt")
                 result = run_tomer_node(current_state)
                 updates = {**updates, **result}
                 current_state = {**current_state, **result}
+                predictions_run.append("topt")
 
-            elif prop_lower in ["ec_number"]:
+            elif prop_lower in ["ec_number", "ec"]:
+                logger.info("Running CLEAN for EC number")
                 result = run_clean_ec_node(current_state)
+                logger.info(f"CLEAN EC result: {result}")
                 updates = {**updates, **result}
                 current_state = {**current_state, **result}
+                predictions_run.append("ec_number")
+                # Store EC result for predictions dict
+                if result.get("response"):
+                    predictions_results["ec_number"] = result.get("response", {})
 
             elif prop_lower in ["kcat", "km"]:
+                logger.info("Running DeepEnzyme for kcat")
+                # Check if ligand_smiles is available before calling
+                ligand = current_state.get("ligand", {})
+                if not ligand.get("ligand_smiles"):
+                    logger.warning("DeepEnzyme requires ligand_smiles - will report missing requirement")
                 result = run_deepenzyme_node(current_state)
+                logger.info(f"DeepEnzyme result: {result}")
                 updates = {**updates, **result}
                 current_state = {**current_state, **result}
+                predictions_run.append("kcat")
 
             elif prop_lower in ["tm", "melting_temperature"]:
+                logger.info("Running TemBERTure for Tm")
                 result = run_temberture_node(current_state)
+                logger.info(f"TemBERTure result: {result}")
                 updates = {**updates, **result}
                 current_state = {**current_state, **result}
+                predictions_run.append("tm")
 
-        except Exception:
-            pass  # Continue with next property
+        except Exception as e:
+            logger.error(f"Error running prediction for {prop_lower}: {e}", exc_info=True)
+            # Don't silently pass - add to errors
+            errors = list(current_state.get("errors", []))
+            errors.append({
+                "node": "run_predictions",
+                "error_type": type(e).__name__,
+                "message": f"Failed to run {prop_lower} prediction: {str(e)}",
+                "recoverable": True,
+            })
+            updates["errors"] = errors
+
+    logger.info(f"Predictions completed: {predictions_run}")
+    logger.info(f"Final response in updates: {updates.get('response', {})}")
+    report_node_complete("Property Predictions", f"Completed: {', '.join(predictions_run)}")
 
     updates["current_node"] = "run_predictions"
     updates["node_history"] = state.get("node_history", []) + ["run_predictions"]

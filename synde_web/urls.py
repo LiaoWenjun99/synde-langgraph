@@ -5,7 +5,7 @@ from django.urls import path
 from django.conf import settings
 from django.conf.urls.static import static
 
-from synde_web.views import main, auth, api, sse
+from synde_web.views import main, auth, api, sse, upload
 
 urlpatterns = [
     # Admin
@@ -37,12 +37,19 @@ urlpatterns = [
     # API - Suggestions
     path('api/suggestions/', api.get_suggestions, name='api_suggestions'),
 
+    # API - File Upload
+    path('api/upload/', upload.upload_file, name='api_upload'),
+    path('api/upload/<str:file_id>/', upload.get_uploaded_file, name='api_upload_detail'),
+
     # SSE streaming
     path('api/conversations/<int:conversation_id>/stream/<str:workflow_id>/',
          sse.workflow_stream, name='workflow_stream'),
 
     # Workflow status (non-SSE)
     path('api/workflow/<str:workflow_id>/status/', sse.workflow_status, name='workflow_status'),
+
+    # Workflow logs
+    path('api/workflow/<str:workflow_id>/logs/', api.workflow_logs, name='workflow_logs'),
 ]
 
 if settings.DEBUG:
